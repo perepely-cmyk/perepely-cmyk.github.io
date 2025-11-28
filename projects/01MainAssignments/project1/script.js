@@ -16,33 +16,28 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
         fontLink.rel = 'stylesheet';
         document.head.appendChild(fontLink);
 
-        let colors = ["#1c80b4", "#fcad2a", "#f82f1d"]; // Blue, Yellow, Red
+        let colors = ["#1c80b4", "#fcad2a", "#f82f1d"]; 
         let grid = 8; 
         let boxes = [];
         let word = "BAUHAUSE"; 
-        let lastInteractionTime = 0; // Tracks time for idle animation
-        let fontReady = false; // Flag to check if font is loaded
+        let lastInteractionTime = 0; 
+        let fontReady = false; 
         
-        // Variables for Centering Logic
         let squareSize = 0;
         let offsetX = 0;
         let offsetY = 0;
         
-        // New: Fixed spacing between cells
-        const GUTTER_SIZE = 10; // 10 pixels as requested
+        const GUTTER_SIZE = 10; 
 
         function setup() {
-            // 1. MAKE CANVAS FULL SCREEN
             let cnv = createCanvas(windowWidth, windowHeight);
             
-            // Add tabindex to canvas to make it focusable
             cnv.elt.setAttribute('tabindex', '0');
             cnv.elt.focus();
             window.focus();
             
             textAlign(CENTER, CENTER);
             
-            // --- FONT LOADING LOGIC ---
             let targetFont = "Saira Stencil One"; 
 
             document.fonts.load(`100px "${targetFont}"`).then(() => {
@@ -53,7 +48,6 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
                 let loader = document.getElementById('loading');
                 if(loader) loader.style.display = 'none';
                 
-                // Initialize the grid layout only after the font is ready
                 initializeGrid();
 
             }).catch(err => {
@@ -67,59 +61,43 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
         }
         
         function initializeGrid() {
-            boxes = []; // Clear existing boxes
+            boxes = []; 
             
-            // 2. CENTER GRID LOGIC
-            // Use 90% of the minimum dimension for the overall grid bounding box (to keep the previous margin)
             let minDim = min(width, height);
             squareSize = minDim * 0.9;
             
-            // Calculate total fixed gutter space (8 cells means 7 gutters)
             let totalGutterSpace = (grid - 1) * GUTTER_SIZE;
             
-            // Calculate the total space available for the 8 letters themselves
             let spaceForLetters = squareSize - totalGutterSpace;
             
-            // Calculate the size of each letter's cell/bounding box
             let letterCellSize = spaceForLetters / grid;
             
-            // Calculate offsets to center the *entire* square grid (including gutters) on the canvas
             offsetX = (width - squareSize) / 2;
             offsetY = (height - squareSize) / 2;
 
             let index = 0;
 
-            // Create grid using explicit row/col iteration for robust centering
             for (let row = 0; row < grid; row++) {
                 for (let col = 0; col < grid; col++) {
                     
-                    // Calculate X position:
-                    // Start of grid area (offsetX)
-                    // + space covered by previous letters (col * letterCellSize)
-                    // + space covered by previous gutters (col * GUTTER_SIZE)
-                    // + offset to center the letter in its cell (letterCellSize / 2)
                     let x = offsetX + 
                             (col * letterCellSize) + 
                             (col * GUTTER_SIZE) + 
                             (letterCellSize / 2);
 
-                    // Calculate Y position:
                     let y = offsetY + 
                             (row * letterCellSize) + 
                             (row * GUTTER_SIZE) + 
                             (letterCellSize / 2);
                     
-                    // Pick color and character
                     let c = colors[(index) % 3];
                     let char = word[index % word.length];
                     
-                    // Pass the calculated letterCellSize to LetterBox
                     boxes.push(new LetterBox(x, y, c, char, letterCellSize));
                     index++;
                 }
             }
             
-            // Initialize interaction timer
             lastInteractionTime = millis();
         }
 
@@ -152,7 +130,6 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
                 cursor(ARROW);
             }
 
-            // Idle Animation Check
             if (millis() - lastInteractionTime > 15000) {
                 if (frameCount % 120 === 0) {
                     triggerRandomAnimation();
@@ -160,15 +137,13 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
             }
         }
         
-        // 3. ADD RESPONSIVENESS
         function windowResized() {
             resizeCanvas(windowWidth, windowHeight);
             if (fontReady) {
-                initializeGrid(); // Recalculate and recenter the grid
+                initializeGrid(); 
             }
         }
 
-        // Helper to run random animation logic
         function triggerRandomAnimation() {
             let count = floor(random(4, 10));
             for (let i = 0; i < count; i++) {
@@ -184,9 +159,8 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
             }
         }
 
-        // Native p5 function that runs when mouse is clicked
         function mousePressed() {
-            lastInteractionTime = millis(); // Reset idle timer
+            lastInteractionTime = millis(); 
             
             if (typeof canvas !== 'undefined' && canvas.focus) canvas.focus();
 
@@ -203,9 +177,8 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
             });
         }
 
-        // Trigger random animations when any key is pressed
         function keyPressed() {
-            lastInteractionTime = millis(); // Reset idle timer
+            lastInteractionTime = millis(); 
             triggerRandomAnimation();
         }
 
@@ -215,8 +188,7 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
                 this.y = y; 
                 this.color = color;
                 this.char = char;
-                this.cellSize = size; // Store actual grid box size for collision
-                // FONT SIZE: Keeping the large size (1.5 multiplier)
+                this.cellSize = size; 
                 this.size = size * 1.5; 
                 
                 this.offset = 0;       
@@ -224,13 +196,11 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
                 this.maxOffset = size / 4; 
                 this.easing = 0.1;     
                 
-                // Scale Properties
                 this.scale = 1.0;
                 this.targetScale = 1.0;
             }
 
             move() {
-                // 1. Offset Easing (Extrusion)
                 let diff = this.targetOffset - this.offset;
                 if (abs(diff) > 0.1) {
                     this.offset += diff * this.easing;
@@ -238,7 +208,6 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
                     this.offset = this.targetOffset;
                 }
                 
-                // 2. Scale Easing (Size Change)
                 let diffS = this.targetScale - this.scale;
                 if (abs(diffS) > 0.001) {
                     this.scale += diffS * this.easing;
@@ -248,45 +217,36 @@ const fontsUrl = "https://fonts.googleapis.com/css2?family=Climate+Crisis&family
             }
 
             show() {
-                // Apply dynamic scaling
                 textSize(this.size * this.scale);
                 
-                // 1. Shadow (Extrusion)
                 fill("#0d0e08"); 
                 let step = 1;    
                 
-                // The extrusion loop draws the shadow backwards from the current offset
                 for (let i = 0; i < this.offset; i += step) {
                     text(this.char, this.x + i, this.y - i);
                 }
 
-                // 2. Face
                 fill(this.color);
                 text(this.char, this.x + this.offset, this.y - this.offset);
             }
 
-            // Helper to check if mouse is inside this cell
             contains(px, py) {
                 let half = this.cellSize / 2;
                 return (px > this.x - half && px < this.x + half && 
                         py > this.y - half && py < this.y + half);
             }
 
-            // Triggered on click or random event
             interact() {
-                // 1. Toggle Size/Scale (kept as is)
                 if (this.targetScale === 1.0) {
-                    this.targetScale = 0.85; // Shrink slightly
+                    this.targetScale = 0.85; 
                 } else {
-                    this.targetScale = 1.0;  // Reset
+                    this.targetScale = 1.0;  
                 }
 
-                // 2. Change Color (Cycle to next color in array) (kept as is)
                 let currentIdx = colors.indexOf(this.color);
                 let nextIdx = (currentIdx + 1) % colors.length;
                 this.color = colors[nextIdx];
                 
-                // 3. Toggle Case (NEW LOGIC)
                 if (this.char === this.char.toUpperCase()) {
                     this.char = this.char.toLowerCase();
                 } else {
