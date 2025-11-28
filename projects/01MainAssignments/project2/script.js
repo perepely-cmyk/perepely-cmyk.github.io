@@ -1,697 +1,588 @@
-// *** ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ***
-        let grid = [];
-        let flippedCards = [];
+        let grid = []; 
+        let flippedCards = []; 
         let volume = 0; 
         let displayVolume = 0; 
-        let isBusy = false;
+        let isBusy = false; 
+        let isShaking = false; 
+        
         let flipAnimation = []; 
-        let matchesCount = 0; 
-        
-        let lastTime = 0;
-        let isGameOver = false;
-        
-        let shuffleState = { 
-            isShuffling: false, 
+        const SHUFFLE_DURATION = 2500; 
+        let shuffleState = { isShuffling: false, startTime: 0, duration: SHUFFLE_DURATION, newPositions: [] };
+        const BOMB_ANIM_DURATION = 1500; 
+        let bombAnimation = { 
+            isAnimating: false, 
             startTime: 0, 
-            duration: 1800, 
-            initialPositions: [], 
-            randomOffsets: [],
-            explosionCenter: { x: 0, y: 0 }, 
-            distances: [], 
-            maxDistance: 1
+            cardIndices: [], 
+            phase: 0 
         }; 
 
-        let pulseOffset = 0;
-        let pulseTime = 0;
-
-        // *** TONE.JS ***
         let synth;
-        let explosionPlayer; 
-        let flipPlayer; 
         
-        // URL загруженных MP3-файлов
-        const EXPLOSION_URL = 'loud-explosion-425457.mp3'; 
-        const FLIP_SOUND_URL = 'flipcard-91468.mp3'; 
-        
-        // --- PRELOAD ФУНКЦИЯ p5.js ---
-        function preload() {
-            // Оставляем пустой
-        }
-        // ------------------------------------------
+        const CANVAS_WIDTH = 1200;
+        const CANVAS_HEIGHT = 800;
+        const GRID_SIZE_X = 6; 
+        const GRID_SIZE_Y = 4;
+        const BASE_CARD_DIM = 100; 
+        const PADDING = 20; 
 
-        function setupAudio() {
-            // Здесь мы ждем, пока Tone.js будет определен
-            if (typeof Tone !== 'undefined') {
-                console.log("Tone.js успешно загружен. Инициализация аудио.");
+        const CARD_WIDTH = BASE_CARD_DIM; 
+        const CARD_HEIGHT = BASE_CARD_DIM; 
+        const BAR_WIDTH = 60;
+        
+        let GRID_START_X, GRID_START_Y;
+        let TOTAL_GRID_WIDTH, VOLUME_BAR_HEIGHT, VOLUME_BAR_Y;
+        
+        const volumeValues = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        const cardActions = [];
+
+        class Card {
+            constructor(id, label, action, color, index) {
+                this.id = id;
+                this.label = label;
+                this.action = action; 
+                this.color = color;
+                this.isFlipped = false;
+                this.currentIndex = index; 
+                this.targetIndex = index; 
+                this.targetX = 0;
+                this.targetY = 0;
+                this.currentX = 0;
+                this.currentY = 0;
+            }
+
+            calculateTargetPosition(index) {
+                const row = floor(index / GRID_SIZE_X); 
+                const col = index % GRID_SIZE_X;
+                this.targetX = GRID_START_X + col * (CARD_WIDTH + PADDING);
+                this.targetY = GRID_START_Y + row * (CARD_HEIGHT + PADDING);
                 
-                // 1. Инициализация игрока Tone.js для загруженной бомбы
-                explosionPlayer = new Tone.Player(EXPLOSION_URL).toDestination();
-                explosionPlayer.volume.value = -3; 
-                explosionPlayer.onload = () => { console.log('Explosion sound loaded successfully!'); };
-                explosionPlayer.onerror = (e) => { console.error('Explosion sound failed to load:', e); };
+                if (this.currentX === 0 && this.currentY === 0) {
+                    this.currentX = this.targetX;
+                    this.currentY = this.targetY;
+                }
+            }
+
+            updatePosition(t) {
+                this.currentX = lerp(this.currentX, this.targetX, 0.08); 
+                this.currentY = lerp(this.currentY, this.targetY, 0.08); 
                 
-                // 2. Инициализация игрока Tone.js для звука перелистывания
-                flipPlayer = new Tone.Player(FLIP_SOUND_URL).toDestination();
-                flipPlayer.volume.value = -8; 
-                flipPlayer.onload = () => { console.log('Flip sound loaded successfully!'); };
-                flipPlayer.onerror = (e) => { console.error('Flip sound failed to load:', e); };
-                
-                // 3. Основной синтезатор для совпадений
-                synth = new Tone.Synth({
-                    oscillator: { type: "sine" },
-                    envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.5 }
-                }).toDestination(); 
-                
-            } else {
-                // Это сообщение не должно появляться после исправления
-                console.error("ОШИБКА: Tone.js не загружен. Аудио будет недоступно. Возможно, проблема с CDN.");
+                const jumpHeight = sin(t * PI) * 10;
+                return jumpHeight;
+            }
+            
+            isAtTarget() {
+                return dist(this.currentX, this.currentY, this.targetX, this.targetY) < 1;
             }
         }
-        // -------------------------------------------------------------
-
-        // --- КОНСТАНТЫ РАЗМЕРА ---
-        const CANVAS_WIDTH = 900; 
-        const CANVAS_HEIGHT = 800; 
-        const GRID_SIZE_X = 8; 
-        const GRID_SIZE_Y = 6; 
-
-        const BASE_CARD_WIDTH = 50;
-        const BASE_CARD_HEIGHT = 50;
-        const SCALE_FACTOR = 1.5; 
-        const PADDING = 10; 
-        const LABEL_VERTICAL_OFFSET = 10; 
-        const FIXED_TOP_OFFSET = 20; 
-
-        const CARD_WIDTH = BASE_CARD_WIDTH * SCALE_FACTOR; 
-        const CARD_HEIGHT = BASE_CARD_HEIGHT * SCALE_FACTOR; 
-        
-        const BAR_WIDTH = 25 * SCALE_FACTOR;
-        let GRID_START_X;
-        let GRID_START_Y;
-        let TOTAL_GRID_WIDTH;
-        let VOLUME_BAR_HEIGHT;
-        let VOLUME_BAR_Y;
-
-        const cardActions = []; 
 
         function setup() {
             const canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
-            canvas.parent(document.body); 
-
-            if (cardActions.length === 0) {
-                 // Числовые карты: 5% до 80% (16 уровней = 16 пар = 32 карты)
-                for (let v = 5; v <= 80; v += 5) {
-                    const R = map(v, 0, 100, 255, 0); 
-                    const G = map(v, 0, 100, 0, 255);
-                    
-                    cardActions.push({ 
-                        label: `${v}%`, 
-                        action: v, 
-                        pairs: 1, 
-                        color: [R, G, 0] 
-                    });
-                }
-
-                // Специальные карты: ТОЛЬКО БОМБА (8 пар = 16 карт)
-                cardActions.push({ 
-                    label: "💣", 
-                    action: 'shuffle', 
-                    pairs: 8, 
-                    color: [255, 180, 0] // Желто-оранжевый
-                });
+            
+            const container = document.getElementById('canvas-container');
+            if (container) {
+                 canvas.parent(container);
+            } else {
+                 console.error("Canvas container not found! P5 will attach to the body instead.");
             }
             
+            if (typeof Tone !== 'undefined') {
+                 synth = new Tone.Synth({
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.05, decay: 0.1, sustain: 0.2, release: 0.5 }
+                }).toDestination();
+                console.log("Tone.js initialized.");
+            } else {
+                console.error("Tone.js library is not loaded.");
+            }
+
             calculateLayout();
-            // *** ИСПРАВЛЕНИЕ: Откладываем инициализацию аудио ***
-            // Это дает внешней библиотеке Tone.js время на загрузку
-            setTimeout(setupAudio, 0); 
-            
+            initializeCardActions();
             initializeGrid();
-            
+
             noStroke();
             rectMode(CORNER);
-            
             textAlign(CENTER, CENTER);
-            textSize(20); 
-            
-            lastTime = millis();
+            angleMode(DEGREES); 
+            textSize(22);
         }
 
         function calculateLayout() {
-            const GRID_WIDTH = GRID_SIZE_X * (CARD_WIDTH + PADDING) - PADDING;
-            const GRID_HEIGHT = GRID_SIZE_Y * (CARD_HEIGHT + PADDING) - PADDING;
+            TOTAL_GRID_WIDTH = GRID_SIZE_X * (CARD_WIDTH + PADDING) - PADDING;
+            const TOTAL_GRID_HEIGHT = GRID_SIZE_Y * (CARD_WIDTH + PADDING) - PADDING;
 
-            TOTAL_GRID_WIDTH = GRID_WIDTH;
-            // Общая ширина, которую занимают сетка и шкала громкости, включая промежутки
-            const TOTAL_WIDTH_NEEDED = GRID_WIDTH + PADDING + BAR_WIDTH + PADDING; 
+            const REQUIRED_RIGHT_SPACE = BAR_WIDTH + PADDING * 4; 
             
-            // Расчет начальной X-позиции для центрирования всей игровой области
-            GRID_START_X = (CANVAS_WIDTH - TOTAL_WIDTH_NEEDED) / 2;
+            GRID_START_X = (CANVAS_WIDTH - TOTAL_GRID_WIDTH - REQUIRED_RIGHT_SPACE) / 2;
+            GRID_START_Y = (CANVAS_HEIGHT - TOTAL_GRID_HEIGHT) / 2; 
             
-            const GLOBAL_START_Y = FIXED_TOP_OFFSET; 
+            VOLUME_BAR_HEIGHT = TOTAL_GRID_HEIGHT;
+            VOLUME_BAR_Y = GRID_START_Y;
+        }
+
+        function initializeCardActions() {
+            let cardId = 0;
             
-            // Расчет начальной Y-позиции для центрирования сетки
-            GRID_START_Y = GLOBAL_START_Y + (CANVAS_HEIGHT - FIXED_TOP_OFFSET - GRID_HEIGHT) / 2; 
-            
-            VOLUME_BAR_HEIGHT = GRID_HEIGHT;
-            VOLUME_BAR_Y = GRID_START_Y; 
+            volumeValues.forEach(v => {
+                const R = map(v, 10, 100, 200, 0);
+                const G = map(v, 10, 100, 100, 200);
+                
+                cardActions.push({ 
+                    id: cardId++,
+                    label: `${v}%`, 
+                    action: v, 
+                    pairs: 2,
+                    color: color(R, G, 50) 
+                });
+            });
+
+            for (let i = 0; i < 2; i++) {
+                cardActions.push({ 
+                    id: cardId++,
+                    label: "🧨", 
+                    action: 'bomb', 
+                    color: color(200, 30, 30), 
+                    pairs: 2 
+                });
+            }
         }
 
         function initializeGrid() {
-            let cardId = 0;
-            grid = []; 
-            flippedCards = []; // Очищаем открытые карты
-            flipAnimation = []; 
-            shuffleState.initialPositions = []; 
+            let initialCards = []; 
+            let index = 0;
 
             cardActions.forEach(action => {
                 for (let i = 0; i < action.pairs; i++) {
-                    grid.push({ id: cardId, label: action.label, action: action.action, color: color(action.color), isFlipped: false, isMatched: false });
-                    grid.push({ id: cardId, label: action.label, action: action.action, color: color(action.color), isFlipped: false, isMatched: false });
-                    cardId++;
+                    initialCards.push(new Card(action.id, action.label, action.action, action.color, index++));
                 }
             });
             
-            shuffleArray(grid);
+            shuffleArray(initialCards);
             
-             for(let i = 0; i < grid.length; i++) {
-                flipAnimation[i] = { targetAngle: 0, currentAngle: 0, currentW: CARD_WIDTH, isAnimating: false, phase: 0 }; 
-                shuffleState.initialPositions[i] = getCardBasePosition(i);
-                // Усиление случайного разброса для реалистичного взрыва
-                shuffleState.randomOffsets[i] = createVector(random(-1, 1) * 600, random(-1, 1) * 600);
-            }
+            grid = initialCards.map((card, i) => {
+                card.currentIndex = i; 
+                card.calculateTargetPosition(i); 
+                return card;
+            });
             
-            volume = 0;
-            displayVolume = 0;
-            matchesCount = 0;
-            isGameOver = false;
-            isBusy = false;
+            resetFlipAnimations();
         }
         
-        function getCardBasePosition(index) {
-            const row = floor(index / GRID_SIZE_X); 
-            const col = index % GRID_SIZE_X;
-            const x_base = GRID_START_X + col * (CARD_WIDTH + PADDING);
-            const y_base = GRID_START_Y + row * (CARD_HEIGHT + PADDING);
-            return { x: x_base, y: y_base };
+        function resetFlipAnimations() {
+             flipAnimation = grid.map(() => ({ 
+                targetAngle: 0, 
+                currentAngle: 0, 
+                currentW: CARD_WIDTH, 
+                currentH: CARD_HEIGHT,
+                isAnimating: false, 
+                phase: 0, 
+                currentX_offset: 0, 
+                currentY_offset: 0 
+            }));
         }
 
         function draw() {
-            const now = millis();
-            let deltaTime = (now - lastTime) / 1000;
-            lastTime = now;
+            let shakeX = 0, shakeY = 0;
+            if (isShaking) {
+                shakeX = random(-5, 5);
+                shakeY = random(-5, 5);
+            }
+            translate(shakeX, shakeY);
+
+            background(255); 
             
-            pulseTime = (millis() / 1000) * 4; 
-            pulseOffset = sin(pulseTime) * 2; 
-            
-            background(240);
+            if (abs(displayVolume - volume) < 0.1) { 
+                displayVolume = volume;
+            } else {
+                displayVolume = lerp(displayVolume, volume, 0.1); 
+            }
+
+            if (typeof Tone !== 'undefined' && Tone.Master) {
+                Tone.Master.volume.value = Tone.gainToDb(max(0.01, displayVolume / 100)); 
+            }
+
+
+            if (bombAnimation.isAnimating) {
+                updateBombAnimation();
+            }
+
+            if (shuffleState.isShuffling) {
+                updateShuffleAnimation();
+            }
+
             drawCards();
             drawVolumeBar();
-            drawGameStatus(); 
+            
+            translate(-shakeX, -shakeY); 
         }
-        
-        function drawGameStatus() {
-            if (volume === 100) {
-                 fill(0, 0, 0, 150);
-                 rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-                 
-                 fill(255, 255, 0); 
-                 textSize(50);
-                 
-                 let message = "ПОБЕДА! ГРОМКОСТЬ 100%";
-                 
-                 text(message, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-                 
-                 fill(255);
-                 textSize(25);
-                 text("Нажмите для начала новой игры.", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
 
-                 isGameOver = true;
-            }
-            
-             textAlign(CENTER, CENTER);
-        }
-        
-        // --- Анимация взрыва и перемешивания (С ВОЛНОЙ) ---
-        function getShuffleOffset(index) {
-            if (!shuffleState.isShuffling) return { x: 0, y: 0 };
-            
+        function updateShuffleAnimation() {
             const elapsed = millis() - shuffleState.startTime;
-            const distance = shuffleState.distances[index]; // Нормализованная дистанция
-            
-            // Время начала движения: чем дальше, тем позже (задержка до 50% длительности)
-            const startDelay = distance * (shuffleState.duration * 0.5); 
-            
-            // Если время еще не пришло, карта не двигается
-            if (elapsed < startDelay) return { x: 0, y: 0 };
-            
-            // Нормализованное время (t) для конкретной карты, учитывая задержку
-            const effectiveElapsed = elapsed - startDelay;
-            const effectiveDuration = shuffleState.duration - startDelay; 
-            
-            let t = constrain(effectiveElapsed / effectiveDuration, 0, 1);
-            
-            let moveFraction = sin(t * PI); // От 0 до 1 и обратно к 0
-            
-            const explosionX = shuffleState.explosionCenter.x;
-            const explosionY = shuffleState.explosionCenter.y;
-            
-            const basePos = shuffleState.initialPositions[index];
-            
-            // Вектор от центра карты до центра взрыва (направление разлета)
-            const directionVector = createVector(basePos.x - explosionX, basePos.y - explosionY);
-            
-            directionVector.normalize().mult(150); // Базовая сила разлета
-            
-            // Смешиваем направленный вектор с случайным вектором
-            const finalOffsetX = (directionVector.x * 0.4 + shuffleState.randomOffsets[index].x * 0.6) * moveFraction;
-            const finalOffsetY = (directionVector.y * 0.4 + shuffleState.randomOffsets[index].y * 0.6) * moveFraction;
+            const t = constrain(elapsed / shuffleState.duration, 0, 1); 
 
-            if (t === 1 && elapsed >= shuffleState.duration) {
-                // Финальная точка анимации (наступает позже для дальних карт)
+            let allAtTarget = true;
+
+            grid.forEach((card, i) => {
+                const jumpHeight = card.updatePosition(t);
+                card.currentY -= jumpHeight; 
+                if (!card.isAtTarget()) {
+                    allAtTarget = false;
+                }
+            });
+            
+            if (t === 1 || (allAtTarget && elapsed > 100)) { 
                 shuffleState.isShuffling = false;
                 isBusy = false;
                 
-                // --- ФИНАЛЬНОЕ ПЕРЕМЕШИВАНИЕ ---
-                shuffleArray(grid);
+                let newGrid = new Array(grid.length);
+                grid.forEach(card => {
+                    newGrid[card.targetIndex] = card;
+                    card.currentIndex = card.targetIndex; 
+                    card.currentX = card.targetX; 
+                    card.currentY = card.targetY;
+                });
+                grid = newGrid;
                 
-                grid.forEach((card, i) => {
-                    if (!card.isMatched) {
-                        card.isFlipped = false;
-                        flipAnimation[i] = { targetAngle: 0, currentAngle: 0, currentW: CARD_WIDTH, isAnimating: false, phase: 0 }; 
-                    }
+                resetFlipAnimations();
+                console.log("Shuffle animation finished. Game ready.");
+            }
+        }
+
+        function triggerShuffleAnimation() {
+            isBusy = true; 
+            shuffleState.isShuffling = true;
+            shuffleState.startTime = millis();
+            shuffleState.newPositions = shuffle([...Array(grid.length).keys()]); 
+
+            grid.forEach((card, i) => {
+                const targetIndex = shuffleState.newPositions[i];
+                card.targetIndex = targetIndex;
+                card.calculateTargetPosition(targetIndex); 
+                card.currentX = card.currentX; 
+                card.currentY = card.currentY; 
+                card.isFlipped = false; 
+            });
+            console.log("Shuffle animation started (2500ms).");
+        }
+        
+        function updateBombAnimation() {
+            const elapsed = millis() - bombAnimation.startTime;
+            const t = constrain(elapsed / BOMB_ANIM_DURATION, 0, 1);
+            const [idx1, idx2] = bombAnimation.cardIndices;
+            
+            const cardIndicesToAnimate = idx2 !== -1 ? [idx1, idx2] : [idx1]; 
+            
+            const PULSE_END_TIME = BOMB_ANIM_DURATION * 0.66; // 1000мс
+            const SHAKE_END_TIME = BOMB_ANIM_DURATION * 0.88; // 1320мс (220мс тряски)
+            
+            if (elapsed < PULSE_END_TIME) {
+                bombAnimation.phase = 1;
+                isShaking = false;
+                
+                const pulseCycleDuration = 500;
+                const pulseTime = elapsed % pulseCycleDuration; 
+                const pulseAmount = 1.1; 
+                
+                let currentScale = 1;
+                if (pulseTime < pulseCycleDuration / 2) {
+                    currentScale = map(pulseTime, 0, pulseCycleDuration / 2, 1, pulseAmount);
+                } else {
+                    currentScale = map(pulseTime, pulseCycleDuration / 2, pulseCycleDuration, pulseAmount, 1);
+                }
+                
+                cardIndicesToAnimate.forEach(index => {
+                    const anim = flipAnimation[index];
+                    anim.currentW = CARD_WIDTH * currentScale;
+                    anim.currentH = CARD_HEIGHT * currentScale;
+                    anim.currentX_offset = 0;
+                    anim.currentY_offset = 0;
+                });
+            } 
+            else if (elapsed < SHAKE_END_TIME) {
+                bombAnimation.phase = 2;
+                isShaking = true; 
+                
+                cardIndicesToAnimate.forEach(index => {
+                    const anim = flipAnimation[index];
+                    anim.currentW = CARD_WIDTH;
+                    anim.currentH = CARD_HEIGHT;
+                    anim.currentX_offset = random(-5, 5);
+                    anim.currentY_offset = random(-5, 5);
+                });
+            }
+            else if (elapsed < BOMB_ANIM_DURATION) {
+                bombAnimation.phase = 3;
+                isShaking = false; 
+                
+                cardIndicesToAnimate.forEach(index => {
+                    const anim = flipAnimation[index];
+                    anim.currentW = CARD_WIDTH;
+                    anim.currentH = CARD_HEIGHT;
+                    anim.currentX_offset = 0;
+                    anim.currentY_offset = 0;
                 });
                 
-                flippedCards = [];
-                return { x: 0, y: 0 };
+            } else {
+                bombAnimation.isAnimating = false;
+                bombAnimation.phase = 0;
+                isShaking = false;
+                
+                cardIndicesToAnimate.forEach(index => {
+                    grid[index].isFlipped = true; 
+                    startClosingAnimation(index); 
+                });
+                
+                setTimeout(triggerShuffleAnimation, 500);
             }
-            
-            return { x: finalOffsetX, y: finalOffsetY };
         }
-        // ------------------------------------------
-
-        // --- Функция отрисовки карты БОМБЫ (Использует эмодзи) ---
-        function drawBombEmoji(x, y, w, h) {
-             fill(255);
-             textSize(30); 
-             // Использование эмодзи гарантирует отображение без ошибок загрузки
-             text('💣', x + w / 2, y + h / 2 + 3); 
+        
+        function triggerBombAnimation(index1, index2 = -1) {
+            bombAnimation.isAnimating = true;
+            bombAnimation.startTime = millis();
+            bombAnimation.cardIndices = [index1, index2]; 
+            
+            volume = 0; 
+            playVolumeChangeSound(0);
+            
+            isBusy = true; 
+            
+            console.log("Bomb triggered! Volume set to 0%. Bomb animation started (1500ms).");
         }
 
         function drawCards() {
+            const [idx1, idx2] = bombAnimation.cardIndices;
+            
             for (let i = 0; i < grid.length; i++) {
                 const card = grid[i];
                 const anim = flipAnimation[i];
                 
-                const basePos = shuffleState.initialPositions[i] || getCardBasePosition(i);
-                
-                const x_base = basePos.x;
-                const y_base = basePos.y;
-                
-                const offset = getShuffleOffset(i);
-                
-                let currentW = anim.currentW;
-                let currentH = CARD_HEIGHT;
-                let x_offset_flip = (CARD_WIDTH - currentW) / 2;
-                let y_offset_pulse = 0;
+                let x = card.currentX + (anim.currentX_offset || 0);
+                let y = card.currentY + (anim.currentY_offset || 0);
 
-                // --- Анимация пульсации ---
-                if (card.action === 'shuffle' && !card.isFlipped && !card.isMatched && !shuffleState.isShuffling) {
-                    currentW = CARD_WIDTH + pulseOffset;
-                    currentH = CARD_HEIGHT + pulseOffset;
-                    x_offset_flip = (CARD_WIDTH - currentW) / 2;
-                    y_offset_pulse = (CARD_HEIGHT - currentH) / 2;
-                }
-
-                const x = x_base + offset.x + x_offset_flip;
-                const y = y_base + offset.y + y_offset_pulse;
-
-
-                // --- Анимация вращения "Дверца" в 2D ---
                 if (anim.isAnimating) {
-                    // Анимация вращения
                     anim.currentAngle = lerp(anim.currentAngle, anim.targetAngle, 0.15);
+                    anim.currentW = CARD_WIDTH * cos(anim.currentAngle - HALF_PI);
+                    anim.currentW = abs(anim.currentW); 
                     
-                    currentW = CARD_WIDTH * cos(anim.currentAngle - HALF_PI);
-                    currentW = abs(currentW); 
+                    if (anim.phase === 1 && abs(anim.currentAngle - HALF_PI) < 0.1) {
+                        card.isFlipped = true;
+                        anim.targetAngle = PI; 
+                        anim.phase = 2; 
+                    } else if (anim.phase === 3 && abs(anim.currentAngle - HALF_PI) < 0.1) {
+                        card.isFlipped = false;
+                        anim.targetAngle = 0; 
+                        anim.phase = 0; 
+                    }
                     
-                    x_offset_flip = (CARD_WIDTH - currentW) / 2;
-
-                    // Фаза 1: Карта идет к 90 градусам (HALF_PI)
-                    if (anim.phase === 1) {
-                        // Точно в середине, когда currentAngle проходит HALF_PI, воспроизводим звук
-                        if (abs(anim.currentAngle - HALF_PI) < 0.1) {
-                            playFlipSound(); 
-                            card.isFlipped = true;
-                            anim.targetAngle = PI; 
-                            anim.phase = 2; // Переход ко второй половине вращения
-                        } 
-                    } 
-                    // Фаза 3: Карта закрывается (идет от isFlipped=true к isFlipped=false)
-                    else if (anim.phase === 3) {
-                        // Точно в середине, когда currentAngle проходит HALF_PI, воспроизводим звук
-                         if (abs(anim.currentAngle - HALF_PI) < 0.1) {
-                            playFlipSound(); 
-                            card.isFlipped = false;
-                            anim.targetAngle = 0; 
-                            anim.phase = 4; // Переход ко второй половине вращения
-                        } 
-                    } 
-                    
-                    // Завершение анимации
-                    if (abs(anim.currentAngle - anim.targetAngle) < 0.01) {
-                        anim.currentAngle = anim.targetAngle;
-                        anim.isAnimating = false;
-                        anim.phase = (anim.targetAngle === 0) ? 0 : 2; 
-                        
-                        currentW = CARD_WIDTH;
-                        currentH = CARD_HEIGHT;
-                        x_offset_flip = 0;
+                    if (abs(anim.currentAngle - anim.targetAngle) < 0.01 && anim.phase !== 1 && anim.phase !== 3) {
+                         anim.currentAngle = anim.targetAngle;
+                         anim.isAnimating = false;
+                         anim.phase = card.isFlipped ? 2 : 0;
+                         anim.currentW = CARD_WIDTH;
+                         
+                         if (anim.phase === 0 && !shuffleState.isShuffling && !bombAnimation.isAnimating) {
+                            isBusy = false;
+                         }
                     }
                 }
                 
+                const currentW = anim.currentW;
+                const currentH = anim.currentH || CARD_HEIGHT; 
+                const x_offset_flip = (CARD_WIDTH - currentW) / 2;
                 
                 push();
                 
-                if (!card.isMatched) { 
-                    
-                    // Задняя сторона карты
-                    fill(100, 100, 200); 
-                    rect(x, y, currentW, currentH, 5);
-                    
-                    let showFront = card.isFlipped;
-                    
-                    if (anim.currentAngle < HALF_PI) {
-                        showFront = false; 
+                fill(70, 70, 150); 
+                rect(x, y, CARD_WIDTH, CARD_HEIGHT, 10);
+                
+                let showFront = card.isFlipped;
+                
+                if (anim.currentAngle < HALF_PI && anim.isAnimating) {
+                    showFront = false; 
+                } else if (anim.currentAngle > HALF_PI && anim.isAnimating) {
+                    showFront = true;
+                }
+                
+                let faceColor = showFront ? card.color : color(50, 50, 150); 
+                
+                fill(faceColor);
+                rect(x + x_offset_flip, y, currentW, currentH, 10);
+                
+                fill(255); 
+                textSize(22); 
+                
+                const isBombAnimating = card.action === 'bomb' && bombAnimation.isAnimating && (i === idx1 || i === idx2);
+                
+                if (showFront && currentW > CARD_WIDTH / 3) { 
+                    if (isBombAnimating) {
+                        push();
+                        textAlign(CENTER, CENTER);
+                        textSize(CARD_WIDTH * 0.8); 
+                        text('🧨', 
+                             x + CARD_WIDTH / 2, 
+                             y + CARD_HEIGHT / 2);
+                        pop();
                     } else {
-                        showFront = true;
+                        text(card.label, 
+                             x + CARD_WIDTH / 2, 
+                             y + CARD_HEIGHT / 2);
                     }
+                }
 
-                    // --- Лицевая сторона карты ---
-                    if (showFront) {
-                        fill(card.color);
-                        rect(x, y, currentW, currentH, 5);
+                if (isBombAnimating && bombAnimation.phase === 3) {
+                    
+                    fill(0);
+                    rect(x, y, CARD_WIDTH, CARD_HEIGHT, 10);
                         
-                        fill(255);
-                        textSize(20); 
-
-                        if (card.action === 'shuffle') {
-                            // Использование функции отрисовки эмодзи
-                            drawBombEmoji(x, y, currentW, currentH);
-                        } else if (currentW > CARD_WIDTH / 3) { 
-                            let cardLabel = card.label;
-                            textSize(20);
-                            text(cardLabel, x + currentW / 2, y + currentH / 2 + 3); 
-                        }
-                    } else {
-                        // Задняя сторона
-                        fill(100, 100, 200);
-                        rect(x, y, currentW, currentH, 5);
-                        
-                        fill(255);
-                        textSize(25);
-                        if (currentW > CARD_WIDTH / 3) { 
-                            text('?', x + currentW / 2, y + currentH / 2 + 3);
-                        }
-                    }
-                } else {
-                    // Совпавшая (исчезнувшая) карточка - фон
-                    fill(220, 220, 220, 150); 
-                    rect(x_base, y_base, CARD_WIDTH, CARD_HEIGHT, 5);
+                    push();
+                    translate(x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2);
+                    
+                    stroke(255, 0, 0); 
+                    strokeWeight(CARD_WIDTH / 20); 
+                    
+                    fill(255, 255, 0); 
+                    star(0, 0, CARD_WIDTH * 0.3, CARD_WIDTH * 0.6, 12); 
+                    pop();
                 }
                 
                 pop();
             }
         }
-
+        
+        function star(x, y, radius1, radius2, npoints) {
+            let angle = 360 / npoints;
+            let halfAngle = angle / 2.0;
+            beginShape();
+            for (let a = 0; a < 360; a += angle) {
+                let sx = x + cos(a) * radius2;
+                let sy = y + sin(a) * radius2;
+                vertex(sx, sy);
+                sx = x + cos(a + halfAngle) * radius1;
+                sy = y + sin(a + halfAngle) * radius1; 
+                vertex(sx, sy);
+            }
+            endShape(CLOSE);
+        }
+        
         function drawVolumeBar() {
-            // Исправлено: BAR_WIDTH + PADDING - это промежуток между сеткой и шкалой
-            const barX = GRID_START_X + TOTAL_GRID_WIDTH + PADDING; 
+            const barX = GRID_START_X + TOTAL_GRID_WIDTH + PADDING * 2; 
             const barY = VOLUME_BAR_Y;
             const barH = VOLUME_BAR_HEIGHT; 
             
-            fill(180);
-            rect(barX, barY, BAR_WIDTH, barH, 5);
+            fill(220);
+            rect(barX, barY, BAR_WIDTH, barH, 15);
             
-            displayVolume = lerp(displayVolume, volume, 0.05); 
-            
-            if (abs(displayVolume - volume) < 0.01) {
-                displayVolume = volume;
-            }
-
             const volumeLevel = map(displayVolume, 0, 100, 0, barH);
             const fillY = barY + barH - volumeLevel; 
 
-            const R_visual = map(displayVolume, 0, 100, 255, 0);
-            const G_visual = map(displayVolume, 0, 100, 0, 255);
-            fill(R_visual, G_visual, 0);
+            fill(0, 170, 0); 
             
-            rect(barX, fillY, BAR_WIDTH, volumeLevel, 5);
+            rect(barX, fillY, BAR_WIDTH, volumeLevel, 15);
             
             fill(50);
-            textSize(14); 
-            
-            text('100%', barX + BAR_WIDTH / 2, barY - LABEL_VERTICAL_OFFSET);
-            text('0%', barX + BAR_WIDTH / 2, barY + barH + LABEL_VERTICAL_OFFSET);
+            textSize(24);
+            text(`${nf(displayVolume, 1, 0)}%`, barX + BAR_WIDTH / 2, barY + barH + 40);
             
             textSize(20);
-            text(`${nf(displayVolume, 1, 0)}%`, barX + BAR_WIDTH / 2, barY + barH / 2); 
-            textSize(20); 
+            fill(50); 
+            text("VOLUME", barX + BAR_WIDTH / 2, barY - 30);
         }
 
         function mousePressed() {
-            // Активация аудио контекста Tone.js при первом клике
             if (typeof Tone !== 'undefined' && Tone.context.state !== 'running') {
                 Tone.start().then(() => {
                     console.log("Audio Context Started.");
                 });
             }
             
-            if (isGameOver) {
-                 if (!isBusy) {
-                    initializeGrid(); 
-                    return; 
-                 }
-            }
-
-            if (isBusy || shuffleState.isShuffling) return; 
+            if (isBusy) return; 
 
             const col = floor((mouseX - GRID_START_X) / (CARD_WIDTH + PADDING));
             const row = floor((mouseY - GRID_START_Y) / (CARD_HEIGHT + PADDING));
             const index = row * GRID_SIZE_X + col;
             
-            if (index < 0 || index >= grid.length || grid.length !== GRID_SIZE_X * GRID_SIZE_Y) return;
+            if (col < 0 || col >= GRID_SIZE_X || row < 0 || row >= GRID_SIZE_Y) return;
+            if (index < 0 || index >= grid.length) return;
 
-            if (index >= 0 && index < grid.length && !grid[index].isFlipped && !grid[index].isMatched) {
-                
+            const card = grid[index];
+
+            if (!card.isFlipped) {
                 flipAnimation[index].isAnimating = true;
-                flipAnimation[index].targetAngle = HALF_PI;
+                flipAnimation[index].targetAngle = PI; 
                 flipAnimation[index].phase = 1;
-
-                const card = grid[index]; 
-
-                // --- НЕМЕДЛЕННАЯ АКТИВАЦИЯ БОМБЫ ---
-                if (card.action === 'shuffle') {
-                    flippedCards.push(index); 
-                    handleShuffleBomb(index, true); 
-                    return; 
-                }
-                // ------------------------------------
 
                 flippedCards.push(index);
 
-                if (flippedCards.length === 2) {
+                if (card.action === 'bomb') {
+                    flippedCards = [index]; 
+                    
                     isBusy = true;
-                    // Оставляем небольшую задержку для просмотра второй карты
+                    setTimeout(checkMatch, 500); 
+                    return;
+                }
+
+                if (flippedCards.length === 2) {
+                    isBusy = true; 
                     setTimeout(checkMatch, 1500); 
                 }
             }
         }
 
-        /**
-         * Активирует эффект "бомбы" при открытии карты BOMB.
-         */
-        function handleShuffleBomb(index, instant = false) {
-            if (isBusy || shuffleState.isShuffling) return; 
-
-            volume = 0;
-            playBombSound(); 
-            isBusy = true; 
-            grid[index].isMatched = true; // Бомба исчезает
-
-            // 1. Установка центра взрыва
-            const bombPos = getCardBasePosition(index);
-            shuffleState.explosionCenter = { 
-                x: bombPos.x + CARD_WIDTH / 2, 
-                y: bombPos.y + CARD_HEIGHT / 2 
-            };
-
-            // 2. Расчет дистанции для эффекта волны
-            let maxDist = 0;
-            shuffleState.distances = grid.map((card, i) => {
-                const pos = getCardBasePosition(i);
-                const dx = pos.x - shuffleState.explosionCenter.x;
-                const dy = pos.y - shuffleState.explosionCenter.y;
-                const dist = sqrt(dx * dx + dy * dy);
-                maxDist = max(maxDist, dist);
-                return dist;
-            });
-            shuffleState.maxDistance = maxDist;
-
-            // 3. Нормализация дистанций (0 - центр, 1 - край)
-            shuffleState.distances = shuffleState.distances.map(d => d / shuffleState.maxDistance);
-            
-            // Анимация закрытия всех несовпавших открытых карт
-            grid.forEach((card, i) => {
-                if (card.isFlipped && !card.isMatched) { 
-                    flipAnimation[i].isAnimating = true;
-                    flipAnimation[i].targetAngle = HALF_PI;
-                    flipAnimation[i].phase = 3; 
-                }
-            });
-
-            // Запускаем анимацию взрыва немедленно
-            if (instant) {
-                flippedCards = []; 
-                triggerShuffleAnimation(); 
-            } else {
-                 setTimeout(() => {
-                    flippedCards = []; 
-                    triggerShuffleAnimation(); 
-                }, 1000); 
-            }
-        }
-
-        function triggerShuffleAnimation() {
-            if (shuffleState.isShuffling) return; 
-
-            // Сбрасываем все анимации, чтобы они начали с 0
-            shuffleState.randomOffsets.forEach((v, i) => {
-                shuffleState.randomOffsets[i] = createVector(random(-1, 1) * 600, random(-1, 1) * 600);
-            });
-
-            isBusy = true; 
-            shuffleState.isShuffling = true;
-            shuffleState.startTime = millis();
-        }
-
-
         function checkMatch() {
-            const index1 = flippedCards[0];
-            const index2 = flippedCards[1];
-            const card1 = grid[index1];
-            const card2 = grid[index2];
-            
-            if (!card1 || !card2) {
-                isBusy = false;
-                flippedCards = [];
-                return;
-            }
-
-
-            if (card1.id === card2.id) {
+            if (flippedCards.length === 1) {
+                const index1 = flippedCards[0];
+                const card1 = grid[index1];
                 
-                handleAction(card1.action); 
-                playMatchSound(card1.action); 
-                
-                matchesCount++;
-
-                card1.isMatched = true;
-                card2.isMatched = true;
-                
-                setTimeout(() => {
+                if (card1.action === 'bomb') {
+                    triggerBombAnimation(index1); 
+                } else {
+                    grid[index1].isFlipped = false;
                     isBusy = false;
-                }, 500); 
-                
-                if (volume === 100) {
-                    isGameOver = true;
                 }
-
-            } else {
-                playNegativeSound();
-                // Несовпадение: запускаем анимацию закрытия
-                flipAnimation[index1].isAnimating = true;
-                flipAnimation[index1].targetAngle = HALF_PI;
-                flipAnimation[index1].phase = 3;
-
-                flipAnimation[index2].isAnimating = true;
-                flipAnimation[index2].targetAngle = HALF_PI;
-                flipAnimation[index2].phase = 3;
+            } 
+            else if (flippedCards.length === 2) {
+                const index1 = flippedCards[0];
+                const index2 = flippedCards[1];
+                const card1 = grid[index1];
+                const card2 = grid[index2];
                 
-                setTimeout(() => {
-                    if (!shuffleState.isShuffling) { 
-                        isBusy = false;
-                    }
-                }, 1000); 
+                if (card1.id !== card2.id) {
+                    console.log("No match. Cards closing.");
+                    startClosingAnimation(index1, index2);
+                } 
+                else if (typeof card1.action === 'number') {
+                    console.log(`Volume Match found: ${card1.label}`);
+                    volume = constrain(card1.action, 0, 100);
+                    playVolumeChangeSound(volume);
+                    
+                    startClosingAnimation(index1, index2);
+                    setTimeout(triggerShuffleAnimation, 500); 
+                }
+                else if (card1.action === 'bomb') {
+                     triggerBombAnimation(index1, index2); 
+                }
             }
-
+            
             flippedCards = [];
         }
-        
-        /**
-         * Воспроизводит загруженный MP3 звук перелистывания.
-         */
-        function playFlipSound() {
-             if (typeof Tone === 'undefined' || Tone.context.state !== 'running' || !flipPlayer) return;
 
-             // Воспроизводим загруженный трек, сбрасывая его, с гарантией, что он загружен
-             if (flipPlayer.loaded) {
-                flipPlayer.start(Tone.now()); 
-             } else {
-                 console.warn("Flip sound not loaded, using fallback.");
-                 // FALLBACK (синтезированный звук, если MP3 не загружен)
-                 const flipNoise = new Tone.NoiseSynth({
-                    noise: { type: 'white' }, 
-                    envelope: { attack: 0.001, decay: 0.05, sustain: 0.0, release: 0.01 }
-                 }).toDestination();
-                 flipNoise.volume.value = -12; 
-                 flipNoise.triggerAttackRelease(0.06); 
-             }
+        function startClosingAnimation(index1, index2 = -1) {
+            [index1, index2].filter(idx => idx !== -1).forEach(index => {
+                if (flipAnimation[index].phase === 2 || grid[index].isFlipped) {
+                    flipAnimation[index].isAnimating = true;
+                    flipAnimation[index].targetAngle = HALF_PI;
+                    flipAnimation[index].phase = 3; 
+                }
+            });
         }
 
-        function playNegativeSound() {
-             if (!synth || typeof Tone === 'undefined' || Tone.context.state !== 'running') return;
-             
-             const noise = new Tone.NoiseSynth({
-                noise: { type: 'pink' },
-                envelope: { attack: 0.001, decay: 0.15, sustain: 0.0, release: 0.05 }
-            }).toDestination();
-            noise.triggerAttackRelease("4n", Tone.now(), 0.5); 
-        }
-        
-        /**
-         * Воспроизводит загруженный MP3 звук взрыва.
-         */
-        function playBombSound() {
-            if (typeof Tone === 'undefined' || Tone.context.state !== 'running' || !explosionPlayer) return;
-            
-            // Воспроизводим загруженный трек, с гарантией, что он загружен
-            if (explosionPlayer.loaded) {
-                explosionPlayer.start(Tone.now());
-            } else {
-                 console.warn("Explosion player not loaded yet, using fallback sound.");
-                 // FALLBACK (На случай, если загрузка не завершится)
-                 const boom = new Tone.MembraneSynth().toDestination();
-                 boom.triggerAttackRelease("C1", 0.5);
-            }
-        }
-
-
-        function playMatchSound(action) {
+        function playVolumeChangeSound(newVolume) {
             if (!synth || typeof Tone === 'undefined' || Tone.context.state !== 'running') return;
 
-            if (typeof action === 'number') {
-                const freq = map(action, 0, 100, 250, 900); 
-                synth.triggerAttackRelease(freq, "8n");
-            } else if (action === 'shuffle') {
-                synth.triggerAttackRelease("C4", "8n");
-            } 
-        }
-
-        function handleAction(action) {
-            if (typeof action === 'number') {
-                volume = constrain(action, 0, 100); 
-            }
+            const minFreq = 130; 
+            const maxFreq = 660;
+            const freq = map(newVolume, 0, 100, minFreq, maxFreq); 
+            
+            synth.triggerAttackRelease(freq, "4n"); 
         }
 
         function shuffleArray(array) {
@@ -699,11 +590,9 @@
                 const j = floor(random(i + 1));
                 [array[i], array[j]] = [array[j], array[i]];
             }
+            return array;
         }
 
         function windowResized() {
-            // В вашем коде p5.js canvas имеет фиксированный размер 900x800.
-            // Если бы размер был динамическим, здесь нужно было бы вызвать resizeCanvas()
-            // и calculateLayout().
             calculateLayout();
         }
